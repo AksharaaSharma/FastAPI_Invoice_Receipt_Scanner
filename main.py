@@ -17,9 +17,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+MONGODB_URI = os.environ.get("MONGODB_URI")
+client = MongoClient(MONGODB_URI)
 
-# MongoDB Setup
-client = MongoClient("mongodb+srv://sharmaaa1604:FStsawGIXBx0Xpy5@cluster0.gaxdoul.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 db = client["receipt_db"]
 collection = db["receipts"]
 
