@@ -1,0 +1,1 @@
+# FastAPI_Invoice_Receipt_Scanner
