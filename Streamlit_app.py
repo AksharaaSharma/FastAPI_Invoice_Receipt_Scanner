@@ -1,18 +1,18 @@
+# dashboard.py
 import streamlit as st
 import requests
 
-st.title("🧾 Invoice & Receipt Scanner")
+API_URL = "https://fastapi-invoice-receipt-scanner.onrender.com/"  # From Render dashboard
 
-uploaded_file = st.file_uploader("Upload invoice image/PDF", type=["png", "jpg", "jpeg", "pdf"])
+st.title("Receipt Management Dashboard")
 
-if uploaded_file is not None:
-    files = {"file": uploaded_file.getvalue()}
-    with st.spinner("Analyzing..."):
-        res = requests.post("https://fastapi-invoice-receipt-scanner.streamlit.app/upload/", files={"file": uploaded_file})
-    if res.ok:
-        st.success("Extracted Text")
-        for line in res.json()["extracted_lines"]:
-            st.write(line)
-    else:
-        st.error("Failed to process the file")
+uploaded_file = st.file_uploader("Upload Receipt")
+if uploaded_file:
+    response = requests.post(f"{API_URL}/upload/", files={"file": uploaded_file})
+    st.success(f"Receipt ID: {response.json()['id']}")
+
+receipt_id = st.text_input("Search Receipt by ID")
+if receipt_id:
+    receipt = requests.get(f"{API_URL}/receipts/{receipt_id}").json()
+    st.json(receipt)
 
