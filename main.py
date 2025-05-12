@@ -1,15 +1,16 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, UploadFile, File
+from pymongo import MongoClient
+from pydantic import BaseModel
 import pytesseract
 from PIL import Image
 import io
-from pymongo import MongoClient
-import uvicorn
-import os
+import re
+import uuid
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# CORS setup
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,26 +18,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Replace with your MongoDB Atlas connection URI
-MONGODB_URI = "mongodb+srv://sharmaaa1604:FStsawGIXBx0Xpy5@cluster0.gaxdoul.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-# Optional: use environment variables instead of hardcoding credentials
-# MONGODB_URI = os.environ.get("MONGODB_URI")
+# MongoDB Setup
+client = MongoClient("mongodb+srv://sharmaaa1604:FStsawGIXBx0Xpy5@cluster0.gaxdoul.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+db = client["receipt_db"]
+collection = db["receipts"]
 
-client = MongoClient(MONGODB_URI)
-db = client["invoices"]  # Use or create the "invoices" database
+class Receipt(BaseModel):
+    items: list
+    total: float
+    vendor: str
 
 @app.post("/upload/")
-async def upload_invoice(file: UploadFile = File(...)):
-    contents = await file.read()
-    image = Image.open(io.BytesIO(contents))
+async def upload_receipt(file: UploadFile = File(...)):
+    # Read image
+    image_data = await file.read()
+    image = Image.open(io.BytesIO(image_data))
+    
+    # OCR Processing
     text = pytesseract.image_to_string(image)
+    
+    # NLP Processing
+    items = re.findall(r'(\d+\s?x?\s?.+?)\$?(\d+\.\d{2})', text)
+    total = re.search(r'TOTAL\s+\$?(\d+\.\d{2})', text)
+    
+    # Store in MongoDB
+    receipt_id = str(uuid.uuid4())
+    document = {
+        "_id": receipt_id,
+        "items": [{"name": item[0], "price": item[1]} for item in items],
+        "total": float(total.group(1)) if total else 0.0,
+        "raw_text": text
+    }
+    collection.insert_one(document)
+    
+    return {"message": "Receipt processed", "id": receipt_id}
 
-    # Basic line parsing — replace with your NLP logic
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    data = {"raw_text": text, "lines": lines}
-    db.records.insert_one(data)
-
-    return {"status": "success", "extracted_lines": lines}
-
-# Run with: uvicorn your_filename:app --reload
-
+@app.get("/receipts/{receipt_id}")
+async def get_receipt(receipt_id: str):
+    return collection.find_one({"_id": receipt_id})
