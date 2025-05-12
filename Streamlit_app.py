@@ -8,7 +8,7 @@ uploaded_file = st.file_uploader("Upload invoice image/PDF", type=["png", "jpg",
 if uploaded_file is not None:
     files = {"file": uploaded_file.getvalue()}
     with st.spinner("Analyzing..."):
-        res = requests.post("http://localhost:8000/upload/", files={"file": uploaded_file})
+        res = requests.post("https://fastapi-invoice-receipt-scanner.streamlit.app/upload/", files={"file": uploaded_file})
     if res.ok:
         st.success("Extracted Text")
         for line in res.json()["extracted_lines"]:
