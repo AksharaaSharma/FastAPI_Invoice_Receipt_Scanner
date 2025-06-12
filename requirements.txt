@@ -1,6 +1,7 @@
-fastapi
-uvicorn
-pytesseract
+streamlit
+opencv-python-headless
 pillow
-pymongo
-python-multipart
+paddleocr
+plotly
+pandas
+requests
