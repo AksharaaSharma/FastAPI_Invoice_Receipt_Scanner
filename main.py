@@ -92,13 +92,13 @@ if 'processed_images' not in st.session_state:
 
 @st.cache_resource
 def initialize_paddle_ocr():
-    """Initialize PaddleOCR with caching"""
+    """Initialize PaddleOCR with caching - fixed parameters"""
     try:
         return PaddleOCR(
             use_angle_cls=True,
             lang='en',
-            use_gpu=False,
-            show_log=False
+            use_gpu=False
+            # Removed show_log parameter as it's not supported
         )
     except Exception as e:
         st.error(f"Failed to initialize PaddleOCR: {str(e)}")
@@ -217,8 +217,7 @@ def display_image_preprocessing_options(image_file, file_name):
         
         st.subheader(f"🔧 Preprocessing Options for {file_name}")
         
-        # Create columns for different preprocessing options
-        cols = st.columns(3)
+        # Select preprocessing method
         selected_preprocessing = st.selectbox(
             f"Select preprocessing method for {file_name}:",
             list(processed_images.keys()),
@@ -226,16 +225,13 @@ def display_image_preprocessing_options(image_file, file_name):
         )
         
         # Display original and selected preprocessing side by side
-        col1, col2 = st.columns(2)
+        # Fixed: Removed nested columns structure
+        st.write("**Original Image:**")
+        st.image(pil_image, caption="Original", use_container_width=True)
         
-        with col1:
-            st.write("**Original Image:**")
-            st.image(pil_image, caption="Original", use_container_width=True)
-        
-        with col2:
-            st.write(f"**{selected_preprocessing}:**")
-            processed_img = processed_images[selected_preprocessing]
-            st.image(processed_img, caption=selected_preprocessing, use_container_width=True)
+        st.write(f"**{selected_preprocessing}:**")
+        processed_img = processed_images[selected_preprocessing]
+        st.image(processed_img, caption=selected_preprocessing, use_container_width=True)
         
         # Store the selected preprocessing for this image
         st.session_state.processed_images[file_name] = {
@@ -307,7 +303,7 @@ def process_image(image_file, paddle_ocr, use_preprocessing=True, file_name=None
         return None
 
 def display_image_analysis(image_file, file_name):
-    """Display image analysis and quality metrics in Streamlit"""
+    """Display image analysis and quality metrics in Streamlit - Fixed nesting issue"""
     try:
         pil_image = Image.open(image_file)
         image_array = np.array(pil_image)
@@ -330,40 +326,49 @@ def display_image_analysis(image_file, file_name):
         # Calculate contrast (standard deviation)
         contrast = np.std(gray)
         
-        # Display metrics
-        col1, col2, col3, col4 = st.columns(4)
+        # Display metrics without nested columns
+        st.write("**Image Quality Metrics:**")
         
-        with col1:
+        # Create metrics in a single row
+        metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+        
+        with metric_col1:
             st.metric("Resolution", f"{width}x{height}")
         
-        with col2:
+        with metric_col2:
             st.metric("Sharpness", f"{sharpness:.1f}")
-            if sharpness < 100:
-                st.warning("⚠️ Low sharpness detected")
         
-        with col3:
+        with metric_col3:
             st.metric("Brightness", f"{brightness:.1f}")
-            if brightness < 50:
-                st.warning("⚠️ Image may be too dark")
-            elif brightness > 200:
-                st.warning("⚠️ Image may be too bright")
         
-        with col4:
+        with metric_col4:
             st.metric("Contrast", f"{contrast:.1f}")
-            if contrast < 30:
-                st.warning("⚠️ Low contrast detected")
         
-        # Quality recommendations
+        # Quality warnings and recommendations
+        warnings = []
         recommendations = []
+        
         if sharpness < 100:
+            warnings.append("⚠️ Low sharpness detected")
             recommendations.append("📸 Consider taking a sharper image")
+            
         if brightness < 50:
+            warnings.append("⚠️ Image may be too dark")
             recommendations.append("💡 Increase lighting or brightness")
-        if brightness > 200:
+        elif brightness > 200:
+            warnings.append("⚠️ Image may be too bright")
             recommendations.append("🔆 Reduce lighting or exposure")
+            
         if contrast < 30:
+            warnings.append("⚠️ Low contrast detected")
             recommendations.append("⚡ Improve contrast")
         
+        # Display warnings
+        if warnings:
+            for warning in warnings:
+                st.warning(warning)
+        
+        # Display recommendations
         if recommendations:
             st.subheader("💡 Quality Recommendations:")
             for rec in recommendations:
@@ -637,15 +642,14 @@ def main():
                 for idx, file in enumerate(uploaded_files):
                     st.subheader(f"📄 {file.name}")
                     
-                    col_img, col_analysis = st.columns([1, 1])
+                    # Display image
+                    image = Image.open(file)
+                    st.image(image, caption=file.name, use_container_width=True)
                     
-                    with col_img:
-                        image = Image.open(file)
-                        st.image(image, caption=file.name, use_container_width=True)
-                    
-                    with col_analysis:
-                        if show_image_analysis:
-                            display_image_analysis(file, file.name)
+                    # Show image analysis if enabled
+                    if show_image_analysis:
+                        file.seek(0)  # Reset file pointer
+                        display_image_analysis(file, file.name)
                     
                     # Show preprocessing options if enabled
                     if enable_preprocessing:
@@ -821,20 +825,22 @@ def main():
             
             for idx, result in enumerate(st.session_state.results):
                 with st.expander(f"📄 {result['file']} - {result['data'].get('vendor', {}).get('name', 'Unknown Vendor')}"):
-                    col1, col2 = st.columns(2)
+                    detail_col1, detail_col2 = st.columns(2)
                     
-                    with col1:
+                    with detail_col1:
                         st.write("**Basic Information:**")
                         data = result["data"]
+                        # COMPLETION OF THE CODE - Add this to the end of your existing code
+
                         st.write(f"• Invoice Number: {data.get('invoiceNumber', 'N/A')}")
                         st.write(f"• Date: {data.get('date', 'N/A')}")
                         st.write(f"• Total Amount: ${data.get('totalAmount', 0):.2f}")
                         st.write(f"• Purpose: {data.get('bill_purpose', 'Not specified')}")
                         
-                        if result["context"]:
+                        if result.get('context'):
                             st.write(f"• Context: {result['context']}")
                     
-                    with col2:
+                    with detail_col2:
                         st.write("**Vendor Information:**")
                         vendor = data.get("vendor", {})
                         st.write(f"• Name: {vendor.get('name', 'N/A')}")
@@ -848,104 +854,219 @@ def main():
                         items_df = pd.DataFrame(data["items"])
                         st.dataframe(items_df, use_container_width=True)
                     
-                    # Raw JSON
-                    with st.expander("View Raw JSON Data"):
-                        st.json(data)
+                    # Financial breakdown
+                    st.write("**Financial Breakdown:**")
+                    fin_col1, fin_col2, fin_col3 = st.columns(3)
+                    
+                    with fin_col1:
+                        st.metric("Subtotal", f"${data.get('subtotal', 0):.2f}")
+                    
+                    with fin_col2:
+                        tax_info = data.get('taxVAT', {})
+                        st.metric("Tax/VAT", f"${tax_info.get('amount', 0):.2f}")
+                    
+                    with fin_col3:
+                        st.metric("Discounts", f"${data.get('discounts', 0):.2f}")
 
         with tab3:
             st.subheader("📊 Data Visualization")
             
+            # Category distribution
             if st.session_state.combined_items:
                 fig = create_visualization(st.session_state.combined_items)
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info("No items found for visualization")
+                    st.info("No items available for visualization")
+            
+            # Spending by vendor
+            vendor_spending = {}
+            for result in st.session_state.results:
+                vendor_name = result["data"].get("vendor", {}).get("name", "Unknown")
+                amount = result["data"].get("totalAmount", 0)
+                if isinstance(amount, (int, float)):
+                    vendor_spending[vendor_name] = vendor_spending.get(vendor_name, 0) + amount
+            
+            if vendor_spending:
+                st.subheader("💰 Spending by Vendor")
+                vendor_fig = go.Figure(
+                    data=[go.Pie(
+                        labels=list(vendor_spending.keys()),
+                        values=list(vendor_spending.values()),
+                        hole=0.3
+                    )]
+                )
+                vendor_fig.update_layout(
+                    title="Spending Distribution by Vendor",
+                    font=dict(family="Arial, sans-serif", size=12),
+                    height=400
+                )
+                st.plotly_chart(vendor_fig, use_container_width=True)
+            
+            # Monthly spending trend (if dates are available)
+            date_amounts = []
+            for result in st.session_state.results:
+                date_str = result["data"].get("date", "")
+                amount = result["data"].get("totalAmount", 0)
+                if date_str and isinstance(amount, (int, float)):
+                    try:
+                        # Try to parse various date formats
+                        import datetime
+                        for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]:
+                            try:
+                                date_obj = datetime.datetime.strptime(date_str, fmt)
+                                date_amounts.append({"date": date_obj, "amount": amount})
+                                break
+                            except:
+                                continue
+                    except:
+                        pass
+            
+            if len(date_amounts) > 1:
+                st.subheader("📈 Spending Trend Over Time")
+                date_amounts.sort(key=lambda x: x["date"])
+                dates = [item["date"] for item in date_amounts]
+                amounts = [item["amount"] for item in date_amounts]
                 
-                # Category breakdown table
-                st.subheader("📋 Category Breakdown")
-                categories = {}
-                for item in st.session_state.combined_items:
-                    category = item.get("itemCategory", "others").lower()
-                    if category not in categories:
-                        categories[category] = {"count": 0, "total_value": 0}
-                    categories[category]["count"] += 1
-                    categories[category]["total_value"] += item.get("totalPrice", 0)
+                trend_fig = go.Figure()
+                trend_fig.add_trace(go.Scatter(
+                    x=dates,
+                    y=amounts,
+                    mode='lines+markers',
+                    name='Spending',
+                    line=dict(color='rgba(102, 126, 234, 0.8)', width=3),
+                    marker=dict(size=8)
+                ))
                 
-                category_df = pd.DataFrame([
-                    {"Category": cat, "Item Count": data["count"], "Total Value": f"${data['total_value']:.2f}"}
-                    for cat, data in categories.items()
-                ])
-                st.dataframe(category_df, use_container_width=True)
-            else:
-                st.info("No items available for visualization")
+                trend_fig.update_layout(
+                    title="Spending Trend Over Time",
+                    xaxis_title="Date",
+                    yaxis_title="Amount ($)",
+                    font=dict(family="Arial, sans-serif", size=12),
+                    height=400
+                )
+                st.plotly_chart(trend_fig, use_container_width=True)
 
         with tab4:
-            st.subheader("💾 Export Results")
+            st.subheader("🔍 OCR Text Review")
+            st.info("Review the extracted OCR text for accuracy")
             
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # JSON Export
-                if st.button("📄 Download JSON Results", use_container_width=True):
-                    json_data = json.dumps(st.session_state.results, indent=2)
-                    st.download_button(
-                        label="Download JSON",
-                        data=json_data,
-                        file_name="ocr_results.json",
-                        mime="application/json"
+            for result in st.session_state.results:
+                with st.expander(f"📄 OCR Text from {result['file']}"):
+                    st.text_area(
+                        f"Extracted text from {result['file']}:",
+                        result.get('ocr_text', 'No OCR text available'),
+                        height=300,
+                        key=f"review_ocr_{result['file']}"
                     )
+
+        with tab5:
+            st.subheader("💾 Export Options")
             
-            with col2:
-                # CSV Export
-                if st.button("📊 Download CSV Summary", use_container_width=True):
-                    summary_data = []
-                    for result in st.session_state.results:
-                        data = result["data"]
-                        summary_data.append({
-                            "File": result["file"],
-                            "Vendor": data.get("vendor", {}).get("name", "Unknown"),
-                            "Date": data.get("date", "Unknown"),
-                            "Invoice_Number": data.get("invoiceNumber", ""),
-                            "Total_Amount": data.get("totalAmount", 0),
-                            "Items_Count": len(data.get("items", [])),
-                            "Purpose": data.get("bill_purpose", ""),
-                            "Context": result.get("context", "")
+            # Prepare export data
+            all_data = []
+            for result in st.session_state.results:
+                data = result["data"]
+                base_info = {
+                    "File Name": result["file"],
+                    "Context": result.get("context", ""),
+                    "Invoice Number": data.get("invoiceNumber", ""),
+                    "Date": data.get("date", ""),
+                    "Vendor Name": data.get("vendor", {}).get("name", ""),
+                    "Vendor Address": data.get("vendor", {}).get("address", ""),
+                    "Vendor Contact": data.get("vendor", {}).get("contactDetails", ""),
+                    "Vendor Tax ID": data.get("vendor", {}).get("taxID", ""),
+                    "Subtotal": data.get("subtotal", 0),
+                    "Discounts": data.get("discounts", 0),
+                    "Tax Rate": data.get("taxVAT", {}).get("rate", 0),
+                    "Tax Amount": data.get("taxVAT", {}).get("amount", 0),
+                    "Total Amount": data.get("totalAmount", 0),
+                    "Bill Purpose": data.get("bill_purpose", "")
+                }
+                
+                # Add items
+                if data.get("items"):
+                    for item in data["items"]:
+                        row = base_info.copy()
+                        row.update({
+                            "Item Name": item.get("itemName", ""),
+                            "Item Category": item.get("itemCategory", ""),
+                            "Quantity": item.get("quantity", 0),
+                            "Unit Price": item.get("unitPrice", 0),
+                            "Item Total Price": item.get("totalPrice", 0)
                         })
-                    
-                    csv_data = pd.DataFrame(summary_data).to_csv(index=False)
-                    st.download_button(
-                        label="Download CSV",
-                        data=csv_data,
-                        file_name="ocr_summary.csv",
-                        mime="text/csv"
-                    )
+                        all_data.append(row)
+                else:
+                    all_data.append(base_info)
             
-            # Items export
-            if st.session_state.combined_items:
-                st.subheader("📦 Export Items Data")
-                items_df = pd.DataFrame(st.session_state.combined_items)
-                csv_items = items_df.to_csv(index=False)
+            if all_data:
+                df = pd.DataFrame(all_data)
+                
+                # CSV Export
+                csv = df.to_csv(index=False)
                 st.download_button(
-                    label="📦 Download All Items CSV",
-                    data=csv_items,
-                    file_name="all_items.csv",
-                    mime="text/csv",
-                    use_container_width=True
+                    label="📥 Download as CSV",
+                    data=csv,
+                    file_name=f"bill_analysis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
                 )
                 
-                # Preview items data
-                with st.expander("Preview Items Data"):
-                    st.dataframe(items_df, use_container_width=True)
+                # JSON Export
+                json_data = {
+                    "export_timestamp": pd.Timestamp.now().isoformat(),
+                    "total_bills": len(st.session_state.results),
+                    "bills": st.session_state.results
+                }
+                
+                st.download_button(
+                    label="📥 Download as JSON",
+                    data=json.dumps(json_data, indent=2),
+                    file_name=f"bill_analysis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
+                
+                # Excel Export
+                try:
+                    excel_buffer = BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                        df.to_excel(writer, sheet_name='Bill Analysis', index=False)
+                        
+                        # Create summary sheet
+                        summary_data = {
+                            'Metric': ['Total Bills', 'Total Amount', 'Total Items', 'Unique Vendors'],
+                            'Value': [
+                                len(st.session_state.results),
+                                sum(r["data"].get("totalAmount", 0) for r in st.session_state.results if isinstance(r["data"].get("totalAmount"), (int, float))),
+                                len(st.session_state.combined_items),
+                                len(set(r["data"].get("vendor", {}).get("name", "Unknown") for r in st.session_state.results))
+                            ]
+                        }
+                        pd.DataFrame(summary_data).to_excel(writer, sheet_name='Summary', index=False)
+                    
+                    st.download_button(
+                        label="📥 Download as Excel",
+                        data=excel_buffer.getvalue(),
+                        file_name=f"bill_analysis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                except Exception as e:
+                    st.warning(f"Excel export not available: {str(e)}")
+                
+                # Preview data
+                st.subheader("📋 Data Preview")
+                st.dataframe(df.head(10), use_container_width=True)
+                
+                if len(df) > 10:
+                    st.info(f"Showing first 10 rows. Total rows: {len(df)}")
 
     # Footer
     st.markdown("---")
-    st.markdown(
-        "<div style='text-align: center; color: #666;'>"
-        "Professional OCR Bill Processor | Built with Streamlit & PaddleOCR | Environment-Free Version"
-        "</div>",
-        unsafe_allow_html=True
-    )
+    st.markdown("""
+    <div style="text-align: center; color: #666; margin-top: 2rem;">
+        <p>🔍 Professional OCR Bill Processor | Built with Streamlit & PaddleOCR</p>
+        <p>Powered by Groq API for intelligent data extraction</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
