@@ -97,7 +97,6 @@ def initialize_paddle_ocr():
         return PaddleOCR(
             use_angle_cls=True,
             lang='en',
-            use_gpu=False
             # Removed show_log parameter as it's not supported
         )
     except Exception as e:
