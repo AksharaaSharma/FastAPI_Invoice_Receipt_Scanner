@@ -5,3 +5,4 @@ paddleocr
 plotly
 pandas
 requests
+opencv-python
