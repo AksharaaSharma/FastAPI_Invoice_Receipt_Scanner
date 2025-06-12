@@ -12,6 +12,7 @@ import tempfile
 import zipfile
 from io import BytesIO
 import pandas as pd
+import numpy as np
 
 # Page configuration
 st.set_page_config(
@@ -69,6 +70,13 @@ st.markdown("""
     .stProgress .st-bo {
         background-color: #667eea;
     }
+    
+    .image-preview {
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 10px;
+        margin: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -79,6 +87,8 @@ if 'results' not in st.session_state:
     st.session_state.results = []
 if 'combined_items' not in st.session_state:
     st.session_state.combined_items = []
+if 'processed_images' not in st.session_state:
+    st.session_state.processed_images = {}
 
 @st.cache_resource
 def initialize_paddle_ocr():
@@ -155,46 +165,217 @@ def safe_extract_json(text):
             "original_text": original_text[:200] + "..."
         }
 
-def process_image(image_file, paddle_ocr):
-    """Process uploaded image file"""
+def preprocess_image_for_ocr(image_array):
+    """
+    Preprocess image for better OCR results using OpenCV (no GUI)
+    Returns the processed image array and displays preview in Streamlit
+    """
+    try:
+        # Convert PIL to OpenCV format if needed
+        if len(image_array.shape) == 3:
+            # Convert RGB to BGR for OpenCV processing
+            opencv_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+        else:
+            opencv_image = image_array
+        
+        # Convert to grayscale
+        gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
+        
+        # Apply different preprocessing techniques
+        preprocessing_options = {
+            "Original Grayscale": gray,
+            "Adaptive Threshold": cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 11, 8
+            ),
+            "Gaussian Threshold": cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 8
+            ),
+            "Gaussian Blur + Threshold": cv2.threshold(
+                cv2.GaussianBlur(gray, (5, 5), 0), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+            )[1],
+            "Median Filter": cv2.medianBlur(gray, 3),
+            "Morphological Operations": cv2.morphologyEx(
+                gray, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            )
+        }
+        
+        return preprocessing_options
+        
+    except Exception as e:
+        st.error(f"Image preprocessing error: {str(e)}")
+        return {"Original": gray if 'gray' in locals() else image_array}
+
+def display_image_preprocessing_options(image_file, file_name):
+    """Display preprocessing options in Streamlit interface"""
+    try:
+        # Load image
+        pil_image = Image.open(image_file)
+        image_array = np.array(pil_image)
+        
+        # Get preprocessing options
+        processed_images = preprocess_image_for_ocr(image_array)
+        
+        st.subheader(f"🔧 Preprocessing Options for {file_name}")
+        
+        # Create columns for different preprocessing options
+        cols = st.columns(3)
+        selected_preprocessing = st.selectbox(
+            f"Select preprocessing method for {file_name}:",
+            list(processed_images.keys()),
+            key=f"preprocessing_{file_name}"
+        )
+        
+        # Display original and selected preprocessing side by side
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Original Image:**")
+            st.image(pil_image, caption="Original", use_container_width=True)
+        
+        with col2:
+            st.write(f"**{selected_preprocessing}:**")
+            processed_img = processed_images[selected_preprocessing]
+            st.image(processed_img, caption=selected_preprocessing, use_container_width=True)
+        
+        # Store the selected preprocessing for this image
+        st.session_state.processed_images[file_name] = {
+            'method': selected_preprocessing,
+            'image': processed_img,
+            'original': image_array
+        }
+        
+        return processed_img
+        
+    except Exception as e:
+        st.error(f"Error in preprocessing display: {str(e)}")
+        return None
+
+def process_image(image_file, paddle_ocr, use_preprocessing=True, file_name=None):
+    """Process uploaded image file with optional preprocessing"""
     try:
         # Save uploaded file temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
             tmp_file.write(image_file.getvalue())
             tmp_path = tmp_file.name
 
-        # Read and preprocess image
-        img = cv2.imread(tmp_path)
-        if img is None:
-            return None
-
-        try:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                     cv2.THRESH_BINARY, 11, 8)
-        except Exception:
-            bw = gray
-
-        # OCR processing
-        result = paddle_ocr.ocr(tmp_path, cls=True)
+        # If preprocessing is enabled and we have a processed image, use it
+        if use_preprocessing and file_name and file_name in st.session_state.processed_images:
+            processed_img = st.session_state.processed_images[file_name]['image']
+            
+            # Save processed image to temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as processed_tmp:
+                cv2.imwrite(processed_tmp.name, processed_img)
+                processed_tmp_path = processed_tmp.name
+            
+            # Use processed image for OCR
+            result = paddle_ocr.ocr(processed_tmp_path, cls=True)
+            
+            # Cleanup processed temp file
+            try:
+                os.unlink(processed_tmp_path)
+            except:
+                pass
+        else:
+            # Use original image
+            result = paddle_ocr.ocr(tmp_path, cls=True)
         
-        # Cleanup temporary file
+        # Cleanup original temp file
         try:
             os.unlink(tmp_path)
         except:
-            pass  # Ignore cleanup errors
+            pass
         
         if not result or not result[0]:
             return None
             
-        return "\n".join([line[1][0] for line in result[0]])
+        extracted_text = "\n".join([line[1][0] for line in result[0]])
+        
+        # Display extracted text in Streamlit
+        if file_name:
+            with st.expander(f"📄 Extracted Text from {file_name}"):
+                st.text_area(
+                    "OCR Result:", 
+                    extracted_text, 
+                    height=200, 
+                    key=f"ocr_text_{file_name}"
+                )
+        
+        return extracted_text
         
     except Exception as e:
         st.error(f"Image processing error: {str(e)}")
         return None
 
+def display_image_analysis(image_file, file_name):
+    """Display image analysis and quality metrics in Streamlit"""
+    try:
+        pil_image = Image.open(image_file)
+        image_array = np.array(pil_image)
+        
+        # Calculate image quality metrics
+        height, width = image_array.shape[:2] if len(image_array.shape) > 1 else (image_array.shape[0], 1)
+        
+        # Convert to grayscale for analysis
+        if len(image_array.shape) == 3:
+            gray = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image_array
+        
+        # Calculate sharpness (Laplacian variance)
+        sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        # Calculate brightness
+        brightness = np.mean(gray)
+        
+        # Calculate contrast (standard deviation)
+        contrast = np.std(gray)
+        
+        # Display metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Resolution", f"{width}x{height}")
+        
+        with col2:
+            st.metric("Sharpness", f"{sharpness:.1f}")
+            if sharpness < 100:
+                st.warning("⚠️ Low sharpness detected")
+        
+        with col3:
+            st.metric("Brightness", f"{brightness:.1f}")
+            if brightness < 50:
+                st.warning("⚠️ Image may be too dark")
+            elif brightness > 200:
+                st.warning("⚠️ Image may be too bright")
+        
+        with col4:
+            st.metric("Contrast", f"{contrast:.1f}")
+            if contrast < 30:
+                st.warning("⚠️ Low contrast detected")
+        
+        # Quality recommendations
+        recommendations = []
+        if sharpness < 100:
+            recommendations.append("📸 Consider taking a sharper image")
+        if brightness < 50:
+            recommendations.append("💡 Increase lighting or brightness")
+        if brightness > 200:
+            recommendations.append("🔆 Reduce lighting or exposure")
+        if contrast < 30:
+            recommendations.append("⚡ Improve contrast")
+        
+        if recommendations:
+            st.subheader("💡 Quality Recommendations:")
+            for rec in recommendations:
+                st.write(f"• {rec}")
+        else:
+            st.success("✅ Image quality looks good for OCR processing!")
+            
+    except Exception as e:
+        st.error(f"Error in image analysis: {str(e)}")
+
 def query_llm_groq(ocr_text, context, groq_api_key, max_retries=3):
-    """Enhanced LLM query with context support - hardcoded API endpoint"""
+    """Enhanced LLM query with context support"""
     
     if len(ocr_text) > 7000:
         ocr_text = ocr_text[:7000] + "...[truncated]"
@@ -263,14 +444,12 @@ Return ONLY valid JSON, no additional text or explanations.
         "Content-Type": "application/json"
     }
 
-    # Hardcoded model configurations - no environment variables
     model_configs = [
         {"model": "llama3-8b-8192", "temperature": 0.1, "max_tokens": 4096},
         {"model": "mixtral-8x7b-32768", "temperature": 0.1, "max_tokens": 4096},
         {"model": "llama3-70b-8192", "temperature": 0.1, "max_tokens": 4096}
     ]
 
-    # Hardcoded API endpoint - no environment variables
     api_endpoint = "https://api.groq.com/openai/v1/chat/completions"
 
     for config in model_configs:
@@ -329,7 +508,6 @@ def create_visualization(items):
     if not items:
         return None
 
-    # Hardcoded categories - no external config
     categories = [
         "electronics", "stationary", "electrical appliances", "tools",
         "cleaning supplies", "beauty products", "clothing and jewellery",
@@ -398,7 +576,7 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # API Key input - direct input, no environment variables
+        # API Key input
         groq_api_key = st.text_input(
             "Groq API Key",
             type="password",
@@ -410,6 +588,19 @@ def main():
             st.warning("⚠️ Please enter your Groq API key to proceed")
             st.info("💡 Get your free API key from: https://console.groq.com/")
             st.stop()
+        
+        st.header("🔧 Processing Options")
+        enable_preprocessing = st.checkbox(
+            "Enable Image Preprocessing",
+            value=True,
+            help="Apply image preprocessing for better OCR results"
+        )
+        
+        show_image_analysis = st.checkbox(
+            "Show Image Quality Analysis",
+            value=True,
+            help="Display image quality metrics and recommendations"
+        )
         
         st.header("📋 Context Options")
         context_option = st.radio(
@@ -441,16 +632,27 @@ def main():
         if uploaded_files:
             st.success(f"✅ {len(uploaded_files)} files uploaded successfully")
             
-            # Show preview of uploaded files
-            with st.expander("📋 Preview Uploaded Files"):
-                cols = st.columns(min(len(uploaded_files), 4))
-                for idx, file in enumerate(uploaded_files[:4]):  # Show max 4 previews
-                    with cols[idx % 4]:
+            # Show preview and analysis of uploaded files
+            with st.expander("📋 Image Preview & Analysis", expanded=True):
+                for idx, file in enumerate(uploaded_files):
+                    st.subheader(f"📄 {file.name}")
+                    
+                    col_img, col_analysis = st.columns([1, 1])
+                    
+                    with col_img:
                         image = Image.open(file)
                         st.image(image, caption=file.name, use_container_width=True)
-                
-                if len(uploaded_files) > 4:
-                    st.info(f"... and {len(uploaded_files) - 4} more files")
+                    
+                    with col_analysis:
+                        if show_image_analysis:
+                            display_image_analysis(file, file.name)
+                    
+                    # Show preprocessing options if enabled
+                    if enable_preprocessing:
+                        file.seek(0)  # Reset file pointer
+                        display_image_preprocessing_options(file, file.name)
+                    
+                    st.markdown("---")
 
     with col2:
         st.header("📊 Processing Stats")
@@ -493,7 +695,6 @@ def main():
             # Processing
             progress_bar = st.progress(0)
             status_text = st.empty()
-            results_container = st.container()
             
             all_results = []
             combined_items = []
@@ -513,8 +714,17 @@ def main():
                     context = ""
                 
                 try:
-                    # OCR Processing
-                    ocr_text = process_image(uploaded_file, paddle_ocr)
+                    # Reset file pointer
+                    uploaded_file.seek(0)
+                    
+                    # OCR Processing with preprocessing option
+                    ocr_text = process_image(
+                        uploaded_file, 
+                        paddle_ocr, 
+                        use_preprocessing=enable_preprocessing,
+                        file_name=uploaded_file.name
+                    )
+                    
                     if not ocr_text:
                         st.warning(f"⚠️ No text extracted from {uploaded_file.name}")
                         continue
@@ -530,7 +740,8 @@ def main():
                     result = {
                         "file": uploaded_file.name,
                         "context": context,
-                        "data": structured_data
+                        "data": structured_data,
+                        "ocr_text": ocr_text
                     }
                     all_results.append(result)
                     
@@ -562,7 +773,7 @@ def main():
         st.header("📈 Results & Analytics")
         
         # Tabs for different views
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📋 Detailed Results", "📈 Visualization", "💾 Export"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "📋 Detailed Results", "📈 Visualization", "🔍 OCR Review", "💾 Export"])
         
         with tab1:
             col1, col2, col3, col4 = st.columns(4)
